@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tinject</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <!-- 默认渐变背景 -->
+    <div class="bg-default" id="bgDefault"></div>
+
+    <!-- 自定义背景图层 -->
+    <div class="bg-layer" id="bgLayer"></div>
+
+    <div class="app-container">
+        <!-- 标题栏 -->
+        <div class="titlebar">
+            <div class="titlebar-left">
+                <div class="app-logo">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                        <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+                <span class="app-title">Tinject</span>
+            </div>
+            <div class="titlebar-right">
+                <button class="titlebar-btn minimize-btn" onclick="minimizeWindow()">
+                    <svg width="12" height="12" viewBox="0 0 12 12">
+                        <rect x="2" y="5.5" width="8" height="1" fill="currentColor"/>
+                    </svg>
+                </button>
+                <button class="titlebar-btn close-btn" onclick="closeApp()">
+                    <svg width="12" height="12" viewBox="0 0 12 12">
+                        <path d="M2 2L10 10M10 2L2 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- 主内容区 -->
+        <div class="main-content">
+            <!-- 侧边导航 -->
+            <nav class="sidebar">
+                <div class="nav-item active" data-page="inject">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                        <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2Z" stroke="currentColor" stroke-width="2"/>
+                        <path d="M12 8V16M8 12H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span>注入</span>
+                </div>
+                <div class="nav-item" data-page="settings">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                        <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
+                        <path d="M12 1V6M12 18V23M4.22 4.22L7.76 7.76M16.24 16.24L19.78 19.78M1 12H6M18 12H23M4.22 19.78L7.76 16.24M16.24 7.76L19.78 4.22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span>设置</span>
+                </div>
+                <div class="nav-item" data-page="config">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                        <path d="M12 15C13.6569 15 15 13.6569 15 12C15 10.3431 13.6569 9 12 9C10.3431 9 9 10.3431 9 12C9 13.6569 10.3431 15 12 15Z" stroke="currentColor" stroke-width="2"/>
+                        <path d="M19.4 15C19.2669 15.3016 19.2272 15.6362 19.286 15.9606C19.3448 16.285 19.4995 16.5843 19.73 16.82L19.79 16.88C19.976 17.0657 20.1235 17.2863 20.2241 17.5291C20.3248 17.7719 20.3766 18.0317 20.3766 18.294C20.3766 18.5563 20.3248 18.8161 20.2241 19.0589C20.1235 19.3017 19.976 19.5223 19.79 19.708C19.6043 19.894 19.3837 20.0415 19.1409 20.1421C18.8981 20.2428 18.6383 20.2946 18.376 20.2946C18.1137 20.2946 17.8539 20.2428 17.6111 20.1421C17.3683 20.0415 17.1477 19.894 16.962 19.708L16.9 19.648C16.6643 19.4175 16.365 19.2628 16.0406 19.204C15.7162 19.1452 15.3816 19.1849 15.08 19.318C14.7866 19.4513 14.5382 19.6749 14.3787 19.9559C14.2191 20.2368 14.1553 20.5581 14.2 20.88V21C14.2 21.5304 13.9893 22.0391 13.6142 22.4142C13.2391 22.7893 12.7304 23 12.2 23C11.6696 23 11.1609 22.7893 10.7858 22.4142C10.4107 22.0391 10.2 21.5304 10.2 21V20.88C10.245 20.5603 10.1804 20.2351 10.0194 19.9504C9.85842 19.6657 9.60878 19.4376 9.315 19.318C9.01344 19.1849 8.67881 19.1452 8.35441 19.204C8.03001 19.2628 7.73067 19.4175 7.495 19.648L7.435 19.708C7.24927 19.894 7.02867 20.0415 6.78587 20.1421C6.54307 20.2428 6.28327 20.2946 6.021 20.2946C5.75873 20.2946 5.49892 20.2428 5.25613 20.1421C5.01333 20.0415 4.79273 19.894 4.607 19.708C4.42105 19.5223 4.27351 19.3017 4.17286 19.0589C4.07221 18.8161 4.02041 18.5563 4.02041 18.294C4.02041 18.0317 4.07221 17.7719 4.17286 17.5291C4.27351 17.2863 4.42105 17.0657 4.607 16.88L4.667 16.82C4.89753 16.5843 5.05217 16.285 5.11101 15.9606C5.16985 15.6362 5.13015 15.3016 4.997 15C4.8637 14.7066 4.64013 14.4582 4.35917 14.2987C4.07821 14.1391 3.75695 14.0753 3.435 14.12H3.3C2.76957 14.12 2.26086 13.9093 1.88579 13.5342C1.51071 13.1591 1.3 12.6504 1.3 12.12C1.3 11.5896 1.51071 11.0809 1.88579 10.7058C2.26086 10.3307 2.76957 10.12 3.3 10.12H3.435C3.75695 10.1647 4.07821 10.1009 4.35917 9.94134C4.64013 9.78178 4.8637 9.53341 4.997 9.24C5.13015 8.93844 5.16985 8.60381 5.11101 8.27941C5.05217 7.95501 4.89753 7.65567 4.667 7.42L4.607 7.36C4.42105 7.17427 4.27351 6.95367 4.17286 6.71087C4.07221 6.46807 4.02041 6.20827 4.02041 5.946C4.02041 5.68373 4.07221 5.42392 4.17286 5.18113C4.27351 4.93833 4.42105 4.71773 4.607 4.532C4.79273 4.34605 5.01333 4.19851 5.25613 4.09786C5.49892 3.99721 5.75873 3.94541 6.021 3.94541C6.28327 3.94541 6.54307 3.99721 6.78587 4.09786C7.02867 4.19851 7.24927 4.34605 7.435 4.532L7.495 4.592C7.73067 4.82253 8.03001 4.97717 8.35441 5.03601C8.67881 5.09485 9.01344 5.05515 9.315 4.922C9.60878 4.7887 9.85842 4.56513 10.0194 4.28417C10.1804 4.00321 10.245 3.68195 10.2 3.36V3.24C10.2 2.70957 10.4107 2.20086 10.7858 1.82579C11.1609 1.45071 11.6696 1.3 12.2 1.3C12.7304 1.3 13.2391 1.45071 13.6142 1.82579C13.9893 2.20086 14.2 2.70957 14.2 3.24V3.36C14.1553 3.68195 14.2191 4.00321 14.3787 4.28417C14.5382 4.56513 14.7866 4.7887 15.08 4.922C15.3816 5.05515 15.7162 5.09485 16.0406 5.03601C16.365 4.97717 16.6643 4.82253 16.9 4.592L16.962 4.532C17.1477 4.34605 17.3683 4.19851 17.6111 4.09786C17.8539 3.99721 18.1137 3.94541 18.376 3.94541C18.6383 3.94541 18.8981 3.99721 19.1409 4.09786C19.3837 4.19851 19.6043 4.34605 19.79 4.532C19.976 4.71773 20.1235 4.93833 20.2241 5.18113C20.3248 5.42392 20.3766 5.68373 20.3766 5.946C20.3766 6.20827 20.3248 6.46807 20.2241 6.71087C20.1235 6.95367 19.976 7.17427 19.79 7.36L19.73 7.42C19.4995 7.65567 19.3448 7.95501 19.286 8.27941C19.2272 8.60381 19.2669 8.93844 19.4 9.24C19.5333 9.53341 19.7817 9.78178 20.0627 9.94134C20.3436 10.1009 20.6649 10.1647 20.9868 10.12H21.1C21.6304 10.12 22.1391 10.3307 22.5142 10.7058C22.8893 11.0809 23.1 11.5896 23.1 12.12C23.1 12.6504 22.8893 13.1591 22.5142 13.5342C22.1391 13.9093 21.6304 14.12 21.1 14.12H20.9868C20.6649 14.0753 20.3436 14.1391 20.0627 14.2987C19.7817 14.4582 19.5333 14.7066 19.4 15Z" stroke="currentColor" stroke-width="2"/>
+                    </svg>
+                    <span>配置</span>
+                </div>
+            </nav>
+
+            <!-- 内容区域 -->
+            <div class="content-area">
+                <!-- 注入页面 -->
+                <div class="page active" id="page-inject">
+                    <div class="page-header">
+                        <h1>DLL 注入</h1>
+                        <p class="subtitle">向目标进程批量注入 DLL 模组</p>
+                    </div>
+
+                    <div class="inject-panel glass glass-card">
+                        <!-- 进程选择器 -->
+                        <div class="form-group">
+                            <label>目标进程（支持多进程批量注入）</label>
+                            <div class="process-selector">
+                                <div class="process-list glass glass-card-sm" id="processList">
+                                    <!-- 动态渲染 -->
+                                </div>
+                                <div class="process-selector-actions">
+                                    <button class="btn btn-glass btn-sm" onclick="openProcessPicker()">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                                            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+                                            <path d="M12 8V16M8 12H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                                        </svg>
+                                        从运行中选择
+                                    </button>
+                                </div>
+                                <div class="process-add-row">
+                                    <input type="text" id="newProcessName" placeholder="输入进程名称，如 javaw.exe" onkeydown="if(event.key==='Enter')addProcess()">
+                                    <button class="btn btn-glass btn-sm" onclick="addProcess()">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                                            <path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                                        </svg>
+                                        添加
+                                    </button>
+                                </div>
+                            </div>
+                            <span class="form-hint">勾选要注入的进程，只注入已启动的进程</span>
+                        </div>
+
+                        <!-- 进程选择弹窗 -->
+                        <div class="process-picker-overlay" id="processPickerOverlay" onclick="closeProcessPicker(event)">
+                            <div class="process-picker glass glass-card" onclick="event.stopPropagation()">
+                                <div class="process-picker-header">
+                                    <h3>选择运行中的进程</h3>
+                                    <button class="btn-icon" onclick="closeProcessPicker()">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                                            <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <div class="process-picker-search">
+                                    <input type="text" id="processPickerSearch" placeholder="搜索进程..." oninput="filterProcessPicker()">
+                                </div>
+                                <div class="process-picker-list" id="processPickerList">
+                                    <!-- 动态渲染 -->
+                                </div>
+                                <div class="process-picker-footer">
+                                    <button class="btn btn-glass" onclick="closeProcessPicker()">取消</button>
+                                    <button class="btn btn-primary-glass" onclick="confirmProcessSelection()">确认选择</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- DLL 文件列表 -->
+                        <div class="form-group">
+                            <label>DLL 文件</label>
+                            <div class="dll-list glass glass-card-sm" id="dllList">
+                                <div class="dll-item empty">
+                                    <span>点击添加 DLL 文件</span>
+                                </div>
+                            </div>
+                            <button class="btn btn-glass btn-sm" onclick="addDllFile()">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                                    <path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                                </svg>
+                                添加 DLL
+                            </button>
+                        </div>
+
+                        <!-- 注入方式 -->
+                        <div class="form-group">
+                            <label>注入方式</label>
+                            <div class="select-wrapper">
+                                <select id="injectMethod">
+                                    <option value="auto">自动选择 (推荐)</option>
+                                    <option value="remote_thread">CreateRemoteThread</option>
+                                    <option value="nt_thread">NtCreateThreadEx</option>
+                                    <option value="apc">QueueUserAPC</option>
+                                    <option value="manual">ManualMap</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- 批量延迟 -->
+                        <div class="form-group">
+                            <label>批量注入间隔 (毫秒)</label>
+                            <input type="number" id="batchDelay" value="500" min="0" max="10000">
+                        </div>
+
+                        <!-- 注入按钮 -->
+                        <button class="btn btn-primary-glass btn-large" id="injectBtn" onclick="startInjection()">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                                <path d="M5 12H19M19 12L12 5M19 12L12 19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                            开始注入
+                        </button>
+                    </div>
+
+                    <!-- 日志区域 -->
+                    <div class="log-panel glass glass-card">
+                        <div class="log-header">
+                            <span>运行日志</span>
+                            <button class="btn-icon" onclick="clearLog()">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                                    <path d="M3 6H21M8 6V4C8 3.44772 8.44772 3 9 3H15C15.5523 3 16 3.44772 16 4V6M19 6V20C19 20.5523 18.5523 21 18 21H6C5.44772 21 5 20.5523 5 20V6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="log-content" id="logContent">
+                            <div class="log-entry info">
+                                <span class="log-time">[00:00:00]</span>
+                                <span class="log-msg">Tinject 已就绪</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 设置页面 -->
+                <div class="page" id="page-settings">
+                    <div class="page-header">
+                        <h1>外观设置</h1>
+                        <p class="subtitle">自定义软件视觉外观样式</p>
+                    </div>
+
+                    <div class="settings-panel glass glass-card">
+                        <!-- 主题 -->
+                        <div class="form-group">
+                            <label>主题模式</label>
+                            <div class="theme-selector">
+                                <div class="theme-option glass glass-card-sm active" data-theme="glass" onclick="selectTheme('glass')">
+                                    <div class="theme-preview glass-preview"></div>
+                                    <span>现代</span>
+                                </div>
+                                <div class="theme-option glass glass-card-sm" data-theme="dark" onclick="selectTheme('dark')">
+                                    <div class="theme-preview dark-preview"></div>
+                                    <span>深色</span>
+                                </div>
+                                <div class="theme-option glass glass-card-sm" data-theme="light" onclick="selectTheme('light')">
+                                    <div class="theme-preview light-preview"></div>
+                                    <span>浅色</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 透明度 -->
+                        <div class="form-group">
+                            <label>界面透明度</label>
+                            <div class="slider-container">
+                                <input type="range" id="opacitySlider" min="50" max="100" value="85" oninput="updateOpacity(this.value)">
+                                <span class="slider-value" id="opacityValue">85%</span>
+                            </div>
+                        </div>
+
+                        <!-- 模糊强度 -->
+                        <div class="form-group">
+                            <label>模糊强度</label>
+                            <div class="slider-container">
+                                <input type="range" id="blurSlider" min="0" max="40" value="24" oninput="updateBlur(this.value)">
+                                <span class="slider-value" id="blurValue">24px</span>
+                            </div>
+                        </div>
+
+                        <!-- 背景图片 -->
+                        <div class="form-group">
+                            <label>背景图片</label>
+                            <div class="bg-controls">
+                                <button class="btn btn-glass btn-sm" onclick="selectBgImage()">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                                        <path d="M21 15V19C21 20.1 20.1 21 19 21H5C3.9 21 3 20.1 3 19V15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                                        <path d="M17 8L12 3L7 8M12 3V15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                    选择图片
+                                </button>
+                                <button class="btn btn-glass btn-sm" onclick="clearBgImage()">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                                        <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                                    </svg>
+                                    清除
+                                </button>
+                                <span class="bg-filename" id="bgFilename">未设置</span>
+                            </div>
+                            <span class="form-hint">自定义窗口背景，留空则使用默认渐变</span>
+                        </div>
+
+                        <!-- 主色调 -->
+                        <div class="form-group">
+                            <label>主色调</label>
+                            <div class="color-picker-container">
+                                <input type="color" id="accentColor" value="#00d4ff" onchange="updateAccentColor(this.value)">
+                                <div class="color-presets">
+                                    <div class="color-preset" style="background: #00d4ff" onclick="updateAccentColor('#00d4ff')"></div>
+                                    <div class="color-preset" style="background: #7c3aed" onclick="updateAccentColor('#7c3aed')"></div>
+                                    <div class="color-preset" style="background: #10b981" onclick="updateAccentColor('#10b981')"></div>
+                                    <div class="color-preset" style="background: #f59e0b" onclick="updateAccentColor('#f59e0b')"></div>
+                                    <div class="color-preset" style="background: #ef4444" onclick="updateAccentColor('#ef4444')"></div>
+                                    <div class="color-preset" style="background: #ec4899" onclick="updateAccentColor('#ec4899')"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 配置页面 -->
+                <div class="page" id="page-config">
+                    <div class="page-header">
+                        <h1>注入配置</h1>
+                        <p class="subtitle">高级注入参数设置</p>
+                    </div>
+
+                    <div class="config-panel glass glass-card">
+                        <!-- 注入方式 -->
+                        <div class="form-group">
+                            <label>默认注入方式
+                                <span class="info-icon" onclick="toggleMethodInfo()">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                                        <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+                                        <path d="M12 16V12M12 8H12.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                                    </svg>
+                                </span>
+                            </label>
+                            <select id="cfgInjectMethod">
+                                <option value="auto">自动选择</option>
+                                <option value="remote_thread">CreateRemoteThread</option>
+                                <option value="nt_thread">NtCreateThreadEx</option>
+                                <option value="apc">QueueUserAPC</option>
+                                <option value="manual">ManualMap</option>
+                            </select>
+                            <span class="form-hint">自动选择会依次尝试所有注入方式</span>
+                            <div class="method-info glass glass-card-sm" id="methodInfo">
+                                <div class="method-info-item">
+                                    <strong>CreateRemoteThread</strong>
+                                    <span>经典注入，兼容性最好，但最容易被检测</span>
+                                </div>
+                                <div class="method-info-item">
+                                    <strong>NtCreateThreadEx</strong>
+                                    <span>内核级线程创建，可绕过部分安全检测</span>
+                                </div>
+                                <div class="method-info-item">
+                                    <strong>QueueUserAPC</strong>
+                                    <span>APC回调注入，不创建新线程，但对Java进程可能不稳定</span>
+                                </div>
+                                <div class="method-info-item">
+                                    <strong>ManualMap</strong>
+                                    <span>手动PE映射，隐蔽性最强，绕过模块枚举检测</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 等待超时 -->
+                        <div class="form-group">
+                            <label>进程等待超时 (毫秒)</label>
+                            <input type="number" id="cfgTimeout" value="30000" min="1000" max="300000">
+                            <span class="form-hint">等待目标进程启动的最大时间</span>
+                        </div>
+
+                        <!-- 批量延迟 -->
+                        <div class="form-group">
+                            <label>默认批量间隔 (毫秒)</label>
+                            <input type="number" id="cfgBatchDelay" value="500" min="0" max="30000">
+                            <span class="form-hint">多个DLL注入之间的延迟时间</span>
+                        </div>
+
+                        <!-- 自动降级 -->
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="cfgAutoFallback" checked>
+                                <span class="checkbox-custom"></span>
+                                <span>启用自动降级</span>
+                            </label>
+                            <span class="form-hint">当首选注入方式失败时自动尝试其他方式</span>
+                        </div>
+
+                        <!-- 保存按钮 -->
+                        <button class="btn btn-primary-glass" onclick="saveConfig()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                                <path d="M19 21H5C4.44772 21 4 20.5523 4 20V4C4 3.44772 4.44772 3 5 3H16L20 7V20C20 20.5523 19.5523 21 19 21Z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                                <path d="M17 21V14H7V21M7 3V8H15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                            </svg>
+                            保存配置
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/liquid-glass.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
