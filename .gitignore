@@ -1,0 +1,19 @@
+# Rust build artifacts
+src-tauri/target/
+src-tauri/**/*.rs.bk
+src-tauri/Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Runtime / local config
+*.local
