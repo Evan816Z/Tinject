@@ -361,6 +361,18 @@ fn main() {
                                 "processes": processes
                             })).unwrap_or_default()
                         }
+                        "check_processes_running" => {
+                            let names: Vec<String> = msg.get("data")
+                                .and_then(|d| d.as_array())
+                                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                                .unwrap_or_default();
+                            log::debug!("检查进程运行状态: {:?}", names);
+                            let statuses = process::check_processes_running(&names);
+                            serde_json::to_string(&serde_json::json!({
+                                "success": true,
+                                "statuses": statuses
+                            })).unwrap_or_default()
+                        }
                         "read_image_base64" => {
                             if let Some(path) = msg.get("path").and_then(|p| p.as_str()) {
                                 log::debug!("读取图片并编码为 base64: {}", path);

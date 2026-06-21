@@ -95,6 +95,7 @@ function addProcess() {
 
     input.value = '';
     renderProcessList();
+    refreshProcessStatus();
     persistState();
     addLog('info', `已添加进程: ${name}`);
 }
@@ -125,7 +126,7 @@ function renderProcessList() {
     }
 
     list.innerHTML = processList.map((proc, index) => `
-        <div class="process-item ${proc.selected ? 'selected' : ''} ${proc.running ? 'running' : 'stopped'}">
+        <div class="process-item ${proc.selected ? 'selected' : ''} ${proc.running ? 'running' : 'stopped'}" data-index="${index}">
             <input type="checkbox" class="process-item-checkbox"
                    ${proc.selected ? 'checked' : ''}
                    onchange="toggleProcess(${index})">
@@ -136,6 +137,61 @@ function renderProcessList() {
             <button class="process-item-remove" onclick="removeProcess(${index})">×</button>
         </div>
     `).join('');
+}
+
+// 实时刷新进程运行状态（轻量更新，不重建整个列表）
+async function refreshProcessStatus() {
+    if (processList.length === 0 || typeof window.ipc === 'undefined') return;
+
+    try {
+        const names = processList.map(p => p.name);
+        const response = await invoke('check_processes_running', names);
+        if (!response.success || !response.statuses) return;
+
+        const statusMap = new Map(response.statuses);
+        let changed = false;
+
+        processList.forEach((proc, index) => {
+            const isRunning = statusMap.get(proc.name) || false;
+            if (proc.running !== isRunning) {
+                proc.running = isRunning;
+                changed = true;
+
+                // 仅更新对应 DOM 项的状态，避免整表重绘
+                const item = document.querySelector(`.process-item[data-index="${index}"]`);
+                const statusEl = item?.querySelector('.process-item-status');
+                if (item) {
+                    item.classList.toggle('running', isRunning);
+                    item.classList.toggle('stopped', !isRunning);
+                }
+                if (statusEl) {
+                    statusEl.classList.toggle('running', isRunning);
+                    statusEl.textContent = isRunning ? '运行中' : '未启动';
+                }
+            }
+        });
+
+        if (changed) {
+            persistState();
+        }
+    } catch (err) {
+        // 静默失败，避免日志刷屏
+        console.debug('刷新进程状态失败:', err);
+    }
+}
+
+// 启动实时状态刷新定时器
+let processStatusTimer = null;
+function startProcessStatusRefresh() {
+    if (processStatusTimer) return;
+    processStatusTimer = setInterval(refreshProcessStatus, 1500);
+}
+
+function stopProcessStatusRefresh() {
+    if (processStatusTimer) {
+        clearInterval(processStatusTimer);
+        processStatusTimer = null;
+    }
 }
 
 // 系统进程选择器
@@ -218,6 +274,8 @@ function confirmProcessSelection() {
 
     if (added > 0) {
         renderProcessList();
+        startProcessStatusRefresh();
+        refreshProcessStatus();
         persistState();
         addLog('info', `已从运行中添加 ${added} 个进程`);
     }
@@ -676,6 +734,7 @@ async function loadConfig() {
 
         renderProcessList();
         renderDllList();
+        refreshProcessStatus();
     } catch (err) {
         console.error('加载配置失败:', err);
     }
@@ -746,5 +805,6 @@ function closeApp() {
 document.addEventListener('DOMContentLoaded', () => {
     loadSettings();
     loadConfig();
+    startProcessStatusRefresh();
     addLog('info', 'Tinject 初始化完成');
 });
