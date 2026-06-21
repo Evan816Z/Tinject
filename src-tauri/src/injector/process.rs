@@ -13,16 +13,19 @@ pub struct ProcessInfo {
 
 /// 枚举所有运行中的进程（使用轻量权限，并行查询）
 pub fn list_running_processes() -> Vec<ProcessInfo> {
+    log::debug!("开始枚举运行中的进程");
     let mut pids = [0u32; 4096];
     let mut bytes_returned = 0u32;
 
     unsafe {
         if EnumProcesses(pids.as_mut_ptr(), std::mem::size_of_val(&pids) as u32, &mut bytes_returned).is_err() {
+            log::error!("EnumProcesses 调用失败");
             return Vec::new();
         }
     }
 
     let count = bytes_returned as usize / std::mem::size_of::<u32>();
+    log::debug!("EnumProcesses 返回 {} 个 PID", count);
 
     // 并行获取进程信息，显著加速枚举
     let mut processes: Vec<ProcessInfo> = pids[..count]
@@ -35,6 +38,7 @@ pub fn list_running_processes() -> Vec<ProcessInfo> {
 
     // 按进程名排序
     processes.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    log::info!("进程枚举完成: 共 {} 个进程", processes.len());
     processes
 }
 
@@ -60,11 +64,13 @@ fn get_process_info(pid: u32) -> Option<(String, String)> {
 
 /// 通过进程名查找PID
 pub fn find_process_by_name(name: &str) -> Option<u32> {
+    log::debug!("通过名称查找进程: {}", name);
     let mut pids = [0u32; 1024];
     let mut bytes_returned = 0u32;
 
     unsafe {
         if EnumProcesses(pids.as_mut_ptr(), std::mem::size_of_val(&pids) as u32, &mut bytes_returned).is_err() {
+            log::error!("EnumProcesses 调用失败");
             return None;
         }
     }
@@ -78,10 +84,13 @@ pub fn find_process_by_name(name: &str) -> Option<u32> {
         }
         if let Some((proc_name, _)) = get_process_info(pid) {
             if proc_name.to_lowercase() == name_lower {
+                log::info!("找到进程: {} -> PID {}", name, pid);
                 return Some(pid);
             }
         }
     }
+
+    log::debug!("未找到进程: {}", name);
     None
 }
 
@@ -100,14 +109,18 @@ pub fn is_process_running(pid: u32) -> bool {
 
 /// 等待进程启动，返回PID
 pub fn wait_for_process(name: &str, timeout_ms: u64) -> Option<u32> {
+    log::info!("等待进程启动: {}, timeout={}ms", name, timeout_ms);
     let start = std::time::Instant::now();
     let poll_interval = std::time::Duration::from_millis(200);
 
     while start.elapsed().as_millis() < timeout_ms as u128 {
         if let Some(pid) = find_process_by_name(name) {
+            log::info!("进程已启动: {} PID={}", name, pid);
             return Some(pid);
         }
         std::thread::sleep(poll_interval);
     }
+
+    log::warn!("等待进程超时: {}", name);
     None
 }

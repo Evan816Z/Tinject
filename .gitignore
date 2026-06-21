@@ -6,6 +6,7 @@ src-tauri/Cargo.lock
 # IDE
 .vscode/
 .idea/
+.vs/
 *.iml
 
 # OS

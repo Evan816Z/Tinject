@@ -150,20 +150,20 @@
                         <div class="form-group">
                             <label>注入方式</label>
                             <div class="select-wrapper">
-                                <select id="injectMethod">
-                                    <option value="auto">自动选择 (推荐)</option>
-                                    <option value="remote_thread">CreateRemoteThread</option>
-                                    <option value="nt_thread">NtCreateThreadEx</option>
-                                    <option value="apc">QueueUserAPC</option>
-                                    <option value="manual">ManualMap</option>
-                                </select>
+                                <select id="injectMethod" onchange="syncInjectMethod(this.value)">
+                                <option value="auto">自动选择 (推荐)</option>
+                                <option value="remote_thread">CreateRemoteThread</option>
+                                <option value="nt_thread">NtCreateThreadEx</option>
+                                <option value="apc">QueueUserAPC</option>
+                                <option value="manual">ManualMap</option>
+                            </select>
                             </div>
                         </div>
 
                         <!-- 批量延迟 -->
                         <div class="form-group">
                             <label>批量注入间隔 (毫秒)</label>
-                            <input type="number" id="batchDelay" value="500" min="0" max="10000">
+                            <input type="number" id="batchDelay" value="500" min="0" max="10000" onchange="syncBatchDelay(this.value)">
                         </div>
 
                         <!-- 注入按钮 -->
@@ -297,7 +297,7 @@
                                     </svg>
                                 </span>
                             </label>
-                            <select id="cfgInjectMethod">
+                            <select id="cfgInjectMethod" onchange="syncCfgInjectMethod(this.value)">
                                 <option value="auto">自动选择</option>
                                 <option value="remote_thread">CreateRemoteThread</option>
                                 <option value="nt_thread">NtCreateThreadEx</option>
@@ -328,25 +328,37 @@
                         <!-- 等待超时 -->
                         <div class="form-group">
                             <label>进程等待超时 (毫秒)</label>
-                            <input type="number" id="cfgTimeout" value="30000" min="1000" max="300000">
+                            <input type="number" id="cfgTimeout" value="30000" min="1000" max="300000" onchange="persistState()">
                             <span class="form-hint">等待目标进程启动的最大时间</span>
                         </div>
 
                         <!-- 批量延迟 -->
                         <div class="form-group">
                             <label>默认批量间隔 (毫秒)</label>
-                            <input type="number" id="cfgBatchDelay" value="500" min="0" max="30000">
+                            <input type="number" id="cfgBatchDelay" value="500" min="0" max="30000" onchange="syncCfgBatchDelay(this.value)">
                             <span class="form-hint">多个DLL注入之间的延迟时间</span>
                         </div>
 
                         <!-- 自动降级 -->
                         <div class="form-group">
                             <label class="checkbox-label">
-                                <input type="checkbox" id="cfgAutoFallback" checked>
+                                <input type="checkbox" id="cfgAutoFallback" checked onchange="persistState()">
                                 <span class="checkbox-custom"></span>
                                 <span>启用自动降级</span>
                             </label>
                             <span class="form-hint">当首选注入方式失败时自动尝试其他方式</span>
+                        </div>
+
+                        <!-- 日志文件夹 -->
+                        <div class="form-group">
+                            <label>日志</label>
+                            <button class="btn btn-glass btn-sm" onclick="openLogFolder()">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                                    <path d="M22 19V9C22 8.46957 21.7893 7.96086 21.4142 7.58579C21.0391 7.21071 20.5304 7 20 7H13.5L10.5 4H4C3.46957 4 2.96086 4.21071 2.58579 4.58579C2.21071 4.96086 2 5.46957 2 6V19C2 19.5304 2.21071 20.0391 2.58579 20.4142C2.96086 20.7893 3.46957 21 4 21H20C20.5304 21 21.0391 20.7893 21.4142 20.4142C21.7893 20.0391 22 19.5304 22 19Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                                打开日志文件夹
+                            </button>
+                            <span class="form-hint">日志保存在 %APPDATA%\Tinject\logs 目录</span>
                         </div>
 
                         <!-- 保存按钮 -->

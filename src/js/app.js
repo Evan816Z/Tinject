@@ -92,9 +92,10 @@ function addProcess() {
         selected: true,
         running: false
     });
-    
+
     input.value = '';
     renderProcessList();
+    persistState();
     addLog('info', `已添加进程: ${name}`);
 }
 
@@ -103,6 +104,7 @@ function removeProcess(index) {
     const name = processList[index].name;
     processList.splice(index, 1);
     renderProcessList();
+    persistState();
     addLog('info', `已移除进程: ${name}`);
 }
 
@@ -110,6 +112,7 @@ function removeProcess(index) {
 function toggleProcess(index) {
     processList[index].selected = !processList[index].selected;
     renderProcessList();
+    persistState();
 }
 
 // 渲染进程列表
@@ -215,7 +218,7 @@ function confirmProcessSelection() {
 
     if (added > 0) {
         renderProcessList();
-        saveSettings();
+        persistState();
         addLog('info', `已从运行中添加 ${added} 个进程`);
     }
 
@@ -245,7 +248,7 @@ function appendDllItem(index) {
         list.innerHTML = '';
     }
     list.appendChild(createDllElement(dllFiles[index], index));
-    saveSettings();
+    persistState();
 }
 
 // 创建 DLL DOM 元素
@@ -312,7 +315,7 @@ function renderDllList() {
 function removeDll(index) {
     dllFiles.splice(index, 1);
     renderDllList();
-    saveSettings();
+    persistState();
     addLog('info', '已移除DLL文件');
 }
 
@@ -363,7 +366,7 @@ function handleDllDrop(e) {
 
     dllFiles.splice(newIndex, 0, moved);
     renderDllList();
-    saveSettings();
+    persistState();
 }
 
 function handleDllDragEnd() {
@@ -598,16 +601,17 @@ function loadSettings() {
     renderProcessList();
 }
 
-// 保存配置
+// 保存配置（自动持久化 DLL 和进程选择）
 async function saveConfig() {
     const config = {
         injection: {
             target_processes: processList.map(p => p.name),
+            persisted_processes: processList.map(p => ({ name: p.name, selected: p.selected })),
             method: document.getElementById('cfgInjectMethod').value,
             process_timeout_ms: parseInt(document.getElementById('cfgTimeout').value),
             batch_delay_ms: parseInt(document.getElementById('cfgBatchDelay').value),
             auto_fallback: document.getElementById('cfgAutoFallback').checked,
-            dll_paths: []
+            dll_paths: dllFiles.map(f => f.path)
         },
         ui: {
             theme: document.querySelector('.theme-option.active')?.dataset.theme || 'glass',
@@ -618,11 +622,11 @@ async function saveConfig() {
             window_height: 620
         }
     };
-    
+
     try {
         const result = await invoke('save_config', config);
         if (result.success) {
-            addLog('success', '配置已保存');
+            logPersistence('配置已保存');
         } else {
             addLog('error', `保存配置失败: ${result.message}`);
         }
@@ -631,20 +635,101 @@ async function saveConfig() {
     }
 }
 
-// 加载配置
+// 加载配置（恢复 DLL 和进程选择）
 async function loadConfig() {
     try {
         const config = await invoke('get_config');
-        
-        document.getElementById('cfgInjectMethod').value = config.injection.method;
-        document.getElementById('cfgTimeout').value = config.injection.process_timeout_ms;
-        document.getElementById('cfgBatchDelay').value = config.injection.batch_delay_ms;
-        document.getElementById('cfgAutoFallback').checked = config.injection.auto_fallback;
-        
-        document.getElementById('injectMethod').value = config.injection.method;
-        document.getElementById('batchDelay').value = config.injection.batch_delay_ms;
+
+        // 恢复注入方式与延迟
+        if (config.injection) {
+            document.getElementById('cfgInjectMethod').value = config.injection.method || 'auto';
+            document.getElementById('cfgTimeout').value = config.injection.process_timeout_ms || 30000;
+            document.getElementById('cfgBatchDelay').value = config.injection.batch_delay_ms || 500;
+            document.getElementById('cfgAutoFallback').checked = config.injection.auto_fallback !== false;
+
+            document.getElementById('injectMethod').value = config.injection.method || 'auto';
+            document.getElementById('batchDelay').value = config.injection.batch_delay_ms || 500;
+
+            // 恢复进程选择
+            if (config.injection.persisted_processes && config.injection.persisted_processes.length > 0) {
+                processList = config.injection.persisted_processes.map(p => ({
+                    name: p.name,
+                    selected: p.selected,
+                    running: false
+                }));
+            } else if (config.injection.target_processes && config.injection.target_processes.length > 0) {
+                processList = config.injection.target_processes.map(name => ({
+                    name,
+                    selected: true,
+                    running: false
+                }));
+            }
+
+            // 恢复 DLL 列表
+            if (config.injection.dll_paths && config.injection.dll_paths.length > 0) {
+                dllFiles = config.injection.dll_paths.map(path => ({
+                    path,
+                    name: path.split('\\').pop() || path.split('/').pop() || path
+                }));
+            }
+        }
+
+        renderProcessList();
+        renderDllList();
     } catch (err) {
         console.error('加载配置失败:', err);
+    }
+}
+
+// 静默持久化辅助函数（避免频繁在日志面板刷屏）
+let persistenceDebounceTimer = null;
+function persistState() {
+    clearTimeout(persistenceDebounceTimer);
+    persistenceDebounceTimer = setTimeout(() => {
+        saveConfig();
+    }, 300);
+}
+
+function logPersistence(message) {
+    // 仅在开发模式或需要时输出；默认不在主日志面板显示，避免干扰
+    if (window.location.search.includes('debug')) {
+        addLog('info', message);
+    }
+}
+
+// 同步注入方式选择（注入页 <-> 配置页）
+function syncInjectMethod(value) {
+    document.getElementById('cfgInjectMethod').value = value;
+    persistState();
+}
+
+function syncCfgInjectMethod(value) {
+    document.getElementById('injectMethod').value = value;
+    persistState();
+}
+
+// 同步批量延迟（注入页 <-> 配置页）
+function syncBatchDelay(value) {
+    document.getElementById('cfgBatchDelay').value = value;
+    persistState();
+}
+
+function syncCfgBatchDelay(value) {
+    document.getElementById('batchDelay').value = value;
+    persistState();
+}
+
+// 打开日志文件夹
+async function openLogFolder() {
+    try {
+        const result = await invoke('open_log_folder');
+        if (result.success) {
+            addLog('info', `已打开日志文件夹: ${result.path}`);
+        } else {
+            addLog('error', `打开日志文件夹失败: ${result.message}`);
+        }
+    } catch (err) {
+        addLog('error', `打开日志文件夹失败: ${err}`);
     }
 }
 

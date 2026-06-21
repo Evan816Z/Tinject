@@ -2,14 +2,12 @@ use super::super::InjectError;
 use std::path::Path;
 use windows::core::PCSTR;
 use windows::Win32::Foundation::CloseHandle;
-use windows::Win32::System::Memory::{
-    VirtualAllocEx, MEM_COMMIT, MEM_RESERVE, PAGE_READWRITE,
-};
+
 use windows::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
 use windows::Win32::System::Threading::{
     OpenProcess, OpenThread, QueueUserAPC,
     THREAD_SUSPEND_RESUME, THREAD_GET_CONTEXT, THREAD_SET_CONTEXT,
-    PROCESS_ALL_ACCESS,
+    PROCESS_QUERY_INFORMATION, PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE,
 };
 
 /// QueueUserAPC 注入
@@ -21,51 +19,45 @@ pub fn inject(pid: u32, dll_path: &str) -> Result<(), InjectError> {
         .map_err(|_| InjectError::DllNotFound(dll_path.to_string()))?;
     let dll_str = dll_path.to_str().ok_or(InjectError::DllNotFound(dll_path.display().to_string()))?;
 
+    crate::injector::validate_architecture(pid, &dll_path)?;
+
     unsafe {
-        let process = OpenProcess(PROCESS_ALL_ACCESS, false, pid)
-            .map_err(|_| InjectError::OpenProcessFailed(pid))?;
+        let access = PROCESS_QUERY_INFORMATION
+            | PROCESS_VM_OPERATION
+            | PROCESS_VM_READ
+            | PROCESS_VM_WRITE;
+        log::debug!("QueueUserAPC OpenProcess access=0x{:x}", access.0);
+        let process = OpenProcess(access, false, pid)
+            .map_err(|e| {
+                log::error!("OpenProcess 失败: {}", e);
+                InjectError::OpenProcessFailed(pid)
+            })?;
+        log::debug!("OpenProcess 成功: handle={:?}", process);
 
-        // 分配内存并写入DLL路径
-        let path_bytes = dll_str.as_bytes();
-        let remote_mem = VirtualAllocEx(
-            process,
-            None,
-            path_bytes.len() + 1,
-            MEM_COMMIT | MEM_RESERVE,
-            PAGE_READWRITE,
-        );
-
-        if remote_mem.is_null() {
-            let _ = CloseHandle(process);
-            return Err(InjectError::VirtualAllocFailed(pid));
-        }
-
-        let mut written = 0usize;
-        let write_result = windows::Win32::System::Diagnostics::Debug::WriteProcessMemory(
-            process,
-            remote_mem,
-            path_bytes.as_ptr() as *const _,
-            path_bytes.len(),
-            Some(&mut written),
-        );
-
-        if write_result.is_err() {
-            let _ = CloseHandle(process);
-            return Err(InjectError::WriteProcessMemoryFailed(pid));
-        }
+        // 写入带空终止符的 DLL 路径
+        let remote_mem = crate::injector::write_remote_dll_path(process, dll_str)?;
 
         // 获取LoadLibraryA地址
         let kernel32 = GetModuleHandleA(PCSTR(b"kernel32.dll\0".as_ptr()))
-            .map_err(|_| InjectError::QueueUserAPCFailed(pid))?;
+            .map_err(|e| {
+                log::error!("GetModuleHandleA(kernel32) 失败: {}", e);
+                InjectError::QueueUserAPCFailed(pid)
+            })?;
         let load_library = GetProcAddress(
             kernel32,
             PCSTR(b"LoadLibraryA\0".as_ptr()),
         )
-        .ok_or(InjectError::QueueUserAPCFailed(pid))?;
+        .ok_or_else(|| {
+            log::error!("GetProcAddress(LoadLibraryA) 失败");
+            InjectError::QueueUserAPCFailed(pid)
+        })?;
+        log::debug!("LoadLibraryA 地址: {:?}", load_library);
 
         // 枚举目标进程的所有线程并队列APC
         let thread_ids = get_process_thread_ids(pid);
+        log::info!("发现目标进程线程数: {}", thread_ids.len());
         let mut queued = false;
+        let mut queued_count = 0;
 
         for tid in &thread_ids {
             let thread = OpenThread(
@@ -82,14 +74,21 @@ pub fn inject(pid: u32, dll_path: &str) -> Result<(), InjectError> {
                 );
                 if result != 0 {
                     queued = true;
+                    queued_count += 1;
+                } else {
+                    log::debug!("QueueUserAPC 对线程 {} 排队失败", tid);
                 }
                 let _ = CloseHandle(thread_handle);
+            } else {
+                log::debug!("OpenThread({}) 失败", tid);
             }
         }
 
         let _ = CloseHandle(process);
+        log::info!("APC 排队完成: 成功 {} 个线程", queued_count);
 
         if !queued {
+            log::error!("没有成功排队任何 APC");
             return Err(InjectError::QueueUserAPCFailed(pid));
         }
     }

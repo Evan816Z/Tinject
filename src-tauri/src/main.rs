@@ -4,6 +4,7 @@
 mod cli;
 mod config;
 mod injector;
+mod logger;
 
 use config::Config;
 use injector::InjectionMethod;
@@ -186,9 +187,31 @@ fn open_file_dialog(filter: Option<&str>) -> Option<String> {
     dialog.pick_file().map(|p| p.to_string_lossy().to_string())
 }
 
+/// 打开日志文件夹
+fn open_log_folder() -> Result<String, String> {
+    let log_dir = logger::FileLogger::log_dir();
+    if !log_dir.exists() {
+        std::fs::create_dir_all(&log_dir).map_err(|e| format!("创建日志目录失败: {}", e))?;
+    }
+
+    let path_str = log_dir.to_string_lossy().to_string();
+
+    // 使用 explorer.exe 打开文件夹
+    match std::process::Command::new("explorer.exe")
+        .arg(&path_str)
+        .spawn()
+    {
+        Ok(_) => Ok(path_str),
+        Err(e) => Err(format!("打开日志文件夹失败: {}", e)),
+    }
+}
+
 fn main() {
-    // 初始化日志
-    env_logger::init();
+    // 初始化文件日志系统
+    if let Err(e) = logger::FileLogger::init() {
+        eprintln!("日志初始化失败: {}", e);
+    }
+    log::info!("Tinject 启动，日志目录: {:?}", logger::FileLogger::log_dir());
 
     // 解析命令行参数
     let cli = cli::Cli::parse();
@@ -217,8 +240,13 @@ fn main() {
     let pending_clone = pending_callbacks.clone();
     let src_dir = get_src_dir();
 
+    // WebView2 用户数据目录使用系统临时目录，避免在程序目录生成文件
+    let webview_data_dir = std::env::temp_dir().join("tinject_webview_data");
+    let _ = std::fs::create_dir_all(&webview_data_dir);
+    let mut web_context = wry::WebContext::new(Some(webview_data_dir));
+
     // 创建 WebView，使用自定义协议加载本地文件
-    let webview = WebViewBuilder::new()
+    let webview = WebViewBuilder::with_web_context(&mut web_context)
         .with_custom_protocol("tinject".into(), move |_webview_id, request| {
             let path = request.uri().path();
             let relative = path.trim_start_matches('/');
@@ -257,22 +285,29 @@ fn main() {
         })
         .with_ipc_handler(move |request| {
             let body = request.body();
+            log::debug!("收到 IPC 请求: {}", body);
             if let Ok(msg) = serde_json::from_str::<serde_json::Value>(body) {
                 if let Some(cmd) = msg.get("cmd").and_then(|c| c.as_str()) {
+                    log::info!("执行 IPC 命令: {}", cmd);
                     let response = match cmd {
                         "inject" => {
                             if let Ok(req) = serde_json::from_value::<InjectRequest>(
                                 msg.get("data").cloned().unwrap_or_default(),
                             ) {
+                                log::info!("注入请求: 目标进程={:?}, DLL数量={}, 方法={}",
+                                    req.target_processes, req.dll_paths.len(), req.method);
                                 let state = state_clone.lock().unwrap();
                                 let result = execute_injection(req, &state.config);
+                                log::info!("注入结果: success={}, message={}", result.success, result.message);
                                 serde_json::to_string(&result).unwrap_or_default()
                             } else {
+                                log::warn!("注入请求参数错误");
                                 r#"{"success":false,"message":"参数错误"}"#.to_string()
                             }
                         }
                         "get_config" => {
                             let state = state_clone.lock().unwrap();
+                            log::debug!("获取配置");
                             serde_json::to_string(&state.config).unwrap_or_default()
                         }
                         "save_config" => {
@@ -282,28 +317,58 @@ fn main() {
                                 let mut state = state_clone.lock().unwrap();
                                 state.config = config.clone();
                                 match config.save() {
-                                    Ok(_) => r#"{"success":true}"#.to_string(),
-                                    Err(e) => format!(r#"{{"success":false,"message":"{}"}}"#, e),
+                                    Ok(_) => {
+                                        log::info!("配置已保存到: {:?}", Config::config_path());
+                                        r#"{"success":true}"#.to_string()
+                                    }
+                                    Err(e) => {
+                                        log::error!("配置保存失败: {}", e);
+                                        format!(r#"{{"success":false,"message":"{}"}}"#, e)
+                                    }
                                 }
                             } else {
+                                log::warn!("保存配置参数错误");
                                 r#"{"success":false,"message":"参数错误"}"#.to_string()
                             }
                         }
                         "close" => {
+                            log::info!("收到关闭应用命令");
                             std::process::exit(0);
                         }
                         "minimize" => {
+                            log::debug!("收到最小化窗口命令");
                             r#"{"success":true}"#.to_string()
                         }
                         "select_file" => {
                             let filter = msg.get("filter").and_then(|f| f.as_str());
+                            log::debug!("打开文件选择对话框, filter={:?}", filter);
                             match open_file_dialog(filter) {
-                                Some(path) => format!(r#"{{"success":true,"path":"{}"}}"#, path.replace('\\', "\\\\")),
-                                None => r#"{"success":false,"message":"用户取消"}"#.to_string(),
+                                Some(path) => {
+                                    log::info!("用户选择文件: {}", path);
+                                    format!(r#"{{"success":true,"path":"{}"}}"#, path.replace('\\', "\\\\"))
+                                }
+                                None => {
+                                    log::debug!("用户取消文件选择");
+                                    r#"{"success":false,"message":"用户取消"}"#.to_string()
+                                }
+                            }
+                        }
+                        "open_log_folder" => {
+                            match open_log_folder() {
+                                Ok(path) => {
+                                    log::info!("已打开日志文件夹: {}", path);
+                                    format!(r#"{{"success":true,"path":"{}"}}"#, path.replace('\\', "\\\\"))
+                                }
+                                Err(e) => {
+                                    log::error!("打开日志文件夹失败: {}", e);
+                                    format!(r#"{{"success":false,"message":"{}"}}"#, e)
+                                }
                             }
                         }
                         "list_processes" => {
+                            log::debug!("开始枚举运行中的进程");
                             let processes = process::list_running_processes();
+                            log::info!("进程枚举完成, 共 {} 个进程", processes.len());
                             serde_json::to_string(&serde_json::json!({
                                 "success": true,
                                 "processes": processes
@@ -311,6 +376,7 @@ fn main() {
                         }
                         "read_image_base64" => {
                             if let Some(path) = msg.get("path").and_then(|p| p.as_str()) {
+                                log::debug!("读取图片并编码为 base64: {}", path);
                                 match std::fs::read(path) {
                                     Ok(bytes) => {
                                         let mime = if path.to_lowercase().ends_with(".png") {
@@ -325,21 +391,29 @@ fn main() {
                                             "image/png"
                                         };
                                         let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+                                        log::info!("图片编码完成: {} -> {} bytes", path, b64.len());
                                         serde_json::to_string(&serde_json::json!({
                                             "success": true,
                                             "data": format!("data:{};base64,{}", mime, b64)
                                         })).unwrap_or_default()
                                     }
-                                    Err(e) => serde_json::to_string(&serde_json::json!({
-                                        "success": false,
-                                        "message": format!("读取图片失败: {}", e)
-                                    })).unwrap_or_default(),
+                                    Err(e) => {
+                                        log::error!("读取图片失败: {} - {}", path, e);
+                                        serde_json::to_string(&serde_json::json!({
+                                            "success": false,
+                                            "message": format!("读取图片失败: {}", e)
+                                        })).unwrap_or_default()
+                                    }
                                 }
                             } else {
+                                log::warn!("读取图片缺少路径参数");
                                 r#"{"success":false,"message":"缺少路径参数"}"#.to_string()
                             }
                         }
-                        _ => r#"{"success":false,"message":"未知命令"}"#.to_string(),
+                        _ => {
+                            log::warn!("收到未知 IPC 命令: {}", cmd);
+                            r#"{"success":false,"message":"未知命令"}"#.to_string()
+                        }
                     };
                     let js = format!(
                         "window.__callback && window.__callback('{}', {})",
@@ -347,6 +421,8 @@ fn main() {
                     );
                     pending_clone.lock().unwrap().push(js);
                 }
+            } else {
+                log::warn!("IPC 请求 JSON 解析失败: {}", body);
             }
         })
         .with_url("tinject://localhost/index.html")
