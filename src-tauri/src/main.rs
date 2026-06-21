@@ -19,6 +19,10 @@ use tao::{
 use wry::{http::Response, WebViewBuilder};
 use std::borrow::Cow;
 use clap::Parser;
+use include_dir::{include_dir, Dir};
+
+/// 嵌入前端资源目录（单文件运行）
+static FRONTEND_DIR: Dir<'_> = include_dir!("../src");
 
 /// 应用状态
 struct AppState {
@@ -133,22 +137,6 @@ fn execute_injection(request: InjectRequest, config: &Config) -> InjectResponse 
     }
 }
 
-/// 获取前端资源目录的绝对路径
-fn get_src_dir() -> std::path::PathBuf {
-    let exe_dir = std::env::current_exe()
-        .unwrap_or_default()
-        .parent()
-        .unwrap_or(std::path::Path::new("."))
-        .to_path_buf();
-    // 开发模式：exe 在 src-tauri/target/debug/，前端在项目根 src/
-    let dev_path = exe_dir.join("../../../src");
-    if dev_path.join("index.html").exists() {
-        return dev_path;
-    }
-    // 发布模式：前端在 exe 同级 src/ 目录
-    exe_dir.join("src")
-}
-
 /// 根据文件扩展名返回 MIME 类型
 fn mime_type(path: &str) -> &'static str {
     if path.ends_with(".html") {
@@ -238,49 +226,48 @@ fn main() {
 
     let state_clone = state.clone();
     let pending_clone = pending_callbacks.clone();
-    let src_dir = get_src_dir();
 
     // WebView2 用户数据目录使用系统临时目录，避免在程序目录生成文件
     let webview_data_dir = std::env::temp_dir().join("tinject_webview_data");
     let _ = std::fs::create_dir_all(&webview_data_dir);
     let mut web_context = wry::WebContext::new(Some(webview_data_dir));
 
-    // 创建 WebView，使用自定义协议加载本地文件
+    // 创建 WebView，使用自定义协议从嵌入资源加载前端文件
     let webview = WebViewBuilder::with_web_context(&mut web_context)
         .with_custom_protocol("tinject".into(), move |_webview_id, request| {
             let path = request.uri().path();
             let relative = path.trim_start_matches('/');
 
-            // 解码 URL 编码
+            // 解码 URL 编码并规范化路径
             let decoded = percent_encoding::percent_decode_str(relative)
                 .decode_utf8_lossy()
                 .to_string();
+            let decoded_normalized = decoded.trim_start_matches('\\').replace('\\', "/");
 
-            // Windows 路径处理：去掉可能存在的前导反斜杠
-            let decoded_normalized = decoded.trim_start_matches('\\').replace('/', "\\");
-
-            // 先尝试作为绝对路径（背景图等外部文件）
-            let file_path = if std::path::Path::new(&decoded_normalized).is_absolute()
-                && std::path::Path::new(&decoded_normalized).exists()
-            {
-                std::path::PathBuf::from(&decoded_normalized)
+            // 空路径或目录默认返回 index.html
+            let file_path = if decoded_normalized.is_empty() || decoded_normalized.ends_with('/') {
+                "index.html".to_string()
             } else {
-                // 否则从 src_dir 解析
-                src_dir.join(&decoded_normalized)
+                decoded_normalized
             };
 
-            if file_path.exists() {
-                let content = std::fs::read(&file_path).unwrap_or_default();
-                let mime = mime_type(&decoded_normalized);
-                Response::builder()
-                    .header("Content-Type", mime)
-                    .body(Cow::Owned(content))
-                    .unwrap()
-            } else {
-                Response::builder()
-                    .status(404)
-                    .body(Cow::Owned(format!("Not found: {}", decoded_normalized).into_bytes()))
-                    .unwrap()
+            // 从嵌入的前端资源中查找文件
+            match FRONTEND_DIR.get_file(&file_path) {
+                Some(file) => {
+                    let content = file.contents().to_vec();
+                    let mime = mime_type(&file_path);
+                    Response::builder()
+                        .header("Content-Type", mime)
+                        .body(Cow::Owned(content))
+                        .unwrap()
+                }
+                None => {
+                    log::warn!("前端资源未找到: {}", file_path);
+                    Response::builder()
+                        .status(404)
+                        .body(Cow::Owned(format!("Not found: {}", file_path).into_bytes()))
+                        .unwrap()
+                }
             }
         })
         .with_ipc_handler(move |request| {
