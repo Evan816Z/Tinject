@@ -1,6 +1,6 @@
 [package]
 name = "tinject"
-version = "1.0.0"
+version = "1.1.0"
 description = "Tinject - Minecraft Forge DLL Injector"
 authors = ["Tinject"]
 edition = "2021"
