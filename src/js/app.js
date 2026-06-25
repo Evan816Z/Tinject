@@ -527,9 +527,92 @@ function clearLog() {
     addLog('info', '日志已清空');
 }
 
-// 切换注入方式说明面板
-function toggleMethodInfo() {
-    document.getElementById('methodInfo').classList.toggle('show');
+// 注入方式信息缓存
+let methodsInfoCache = null;
+
+// 从后端加载注入方式信息
+async function loadMethodsInfo() {
+    if (methodsInfoCache) return methodsInfoCache;
+    try {
+        const resp = await invoke('get_methods_info');
+        const data = JSON.parse(resp);
+        if (data.success) {
+            methodsInfoCache = data.methods;
+            return methodsInfoCache;
+        }
+    } catch (e) {
+        console.error('加载注入方式信息失败:', e);
+    }
+    return null;
+}
+
+// 显示注入方式提示（注入页）
+async function showMethodTooltip(elementId, event) {
+    event.stopPropagation();
+    const tooltip = document.getElementById(elementId);
+    if (!tooltip) return;
+
+    // 如果已显示，则隐藏
+    if (tooltip.classList.contains('show')) {
+        tooltip.classList.remove('show');
+        return;
+    }
+
+    // 隐藏其他 tooltip
+    document.querySelectorAll('.method-tooltip.show').forEach(t => t.classList.remove('show'));
+
+    const methods = await loadMethodsInfo();
+    if (!methods) return;
+
+    // 获取当前选中的注入方式
+    const selectId = elementId === 'injectMethodTooltip' ? 'injectMethod' : 'cfgInjectMethod';
+    const currentMethod = document.getElementById(selectId)?.value || 'auto';
+
+    // 找到对应的方法信息
+    const method = methods.find(m => m.name === currentMethod);
+    if (!method) return;
+
+    tooltip.innerHTML = `
+        <div class="method-tooltip-title">${method.label}</div>
+        <div class="method-tooltip-desc">${method.description}</div>
+        <div class="method-tooltip-pros"><strong>优点：</strong>${method.pros}</div>
+        <div class="method-tooltip-cons"><strong>缺点：</strong>${method.cons}</div>
+    `;
+
+    tooltip.classList.add('show');
+
+    // 点击外部关闭
+    setTimeout(() => {
+        document.addEventListener('click', function closeTooltip(e) {
+            if (!tooltip.contains(e.target)) {
+                tooltip.classList.remove('show');
+                document.removeEventListener('click', closeTooltip);
+            }
+        });
+    }, 100);
+}
+
+// 切换注入方式说明面板（配置页）
+async function toggleMethodInfo() {
+    const panel = document.getElementById('methodInfo');
+    if (!panel) return;
+
+    if (panel.classList.contains('show')) {
+        panel.classList.remove('show');
+        return;
+    }
+
+    const methods = await loadMethodsInfo();
+    if (!methods) return;
+
+    panel.innerHTML = methods.map(m => `
+        <div class="method-info-item">
+            <strong>${m.label}</strong>
+            <span>${m.description}</span>
+        </div>
+    `).join('');
+
+    panel.classList.add('show');
 }
 
 // 主题切换

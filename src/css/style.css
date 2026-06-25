@@ -1035,6 +1035,40 @@ input[type="color"]::-webkit-color-swatch {
 }
 .method-info-item span { color: var(--text-secondary); }
 
+.method-tooltip {
+    display: none;
+    margin-top: 8px;
+    padding: 12px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.6;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+.method-tooltip.show { display: block; }
+
+.method-tooltip-title {
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 6px;
+    font-size: 13px;
+}
+.method-tooltip-desc {
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+.method-tooltip-pros,
+.method-tooltip-cons {
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+.method-tooltip-pros strong,
+.method-tooltip-cons strong {
+    color: var(--text-primary);
+}
+
 /* ========================================
    背景图控件
    ======================================== */

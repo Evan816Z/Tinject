@@ -4,6 +4,7 @@ pub mod process;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use windows::Win32::Foundation::HANDLE;
 
 /// 注入方式枚举
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -73,9 +74,84 @@ pub enum InjectError {
     ArchitectureMismatch(String),
 }
 
+/// 注入上下文：公共步骤的结果，传递给各注入方法
+pub struct InjectContext {
+    pub process_handle: HANDLE,
+    pub remote_dll_path: *mut std::ffi::c_void,
+    pub load_library_addr: *mut std::ffi::c_void,
+    pub dll_data: Vec<u8>,
+}
+
+/// 准备注入上下文：架构检查、打开进程、写入DLL路径、获取LoadLibraryA地址
+/// 这些步骤对所有注入方式通用，只做一次
+pub fn prepare_inject_context(
+    pid: u32,
+    dll_path: &str,
+) -> Result<InjectContext, InjectError> {
+    use windows::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
+    use windows::Win32::System::Threading::{
+        OpenProcess, PROCESS_CREATE_THREAD, PROCESS_QUERY_INFORMATION,
+        PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE,
+    };
+    use windows::core::PCSTR;
+
+    let dll_path_buf = std::path::Path::new(dll_path)
+        .canonicalize()
+        .map_err(|_| InjectError::DllNotFound(dll_path.to_string()))?;
+    let dll_str = dll_path_buf.to_str().ok_or(InjectError::DllNotFound(dll_path.to_string()))?;
+
+    // 1. 架构检查
+    validate_architecture(pid, &dll_path_buf)?;
+
+    // 2. 打开进程（最小权限）
+    let access = PROCESS_CREATE_THREAD
+        | PROCESS_QUERY_INFORMATION
+        | PROCESS_VM_OPERATION
+        | PROCESS_VM_READ
+        | PROCESS_VM_WRITE;
+    log::debug!("OpenProcess access=0x{:x}", access.0);
+    let process = unsafe {
+        OpenProcess(access, false, pid).map_err(|e| {
+            log::error!("OpenProcess 失败: {}", e);
+            InjectError::OpenProcessFailed(pid)
+        })?
+    };
+    log::debug!("OpenProcess 成功: handle={:?}", process);
+
+    // 3. 写入DLL路径到目标进程
+    let remote_mem = unsafe { write_remote_dll_path(process, dll_str)? };
+
+    // 4. 获取 LoadLibraryA 地址
+    let kernel32 = unsafe {
+        GetModuleHandleA(PCSTR(b"kernel32.dll\0".as_ptr())).map_err(|e| {
+            log::error!("GetModuleHandleA(kernel32) 失败: {}", e);
+            InjectError::OpenProcessFailed(pid)
+        })?
+    };
+    let load_library = unsafe {
+        GetProcAddress(kernel32, PCSTR(b"LoadLibraryA\0".as_ptr())).ok_or_else(|| {
+            log::error!("GetProcAddress(LoadLibraryA) 失败");
+            InjectError::OpenProcessFailed(pid)
+        })?
+    };
+    log::debug!("LoadLibraryA 地址: {:?}", load_library);
+    let load_library_ptr = load_library as *mut std::ffi::c_void;
+
+    // 5. 读取DLL文件（ManualMap需要）
+    let dll_data = std::fs::read(&dll_path_buf)
+        .map_err(|e| InjectError::DllNotFound(format!("读取DLL失败: {}", e)))?;
+
+    Ok(InjectContext {
+        process_handle: process,
+        remote_dll_path: remote_mem,
+        load_library_addr: load_library_ptr,
+        dll_data,
+    })
+}
+
 /// 将 DLL 路径以空终止 C 字符串形式写入目标进程内存
 pub unsafe fn write_remote_dll_path(
-    process: windows::Win32::Foundation::HANDLE,
+    process: HANDLE,
     dll_path: &str,
 ) -> Result<*mut std::ffi::c_void, InjectError> {
     use windows::Win32::System::Memory::{VirtualAllocEx, MEM_COMMIT, MEM_RESERVE, PAGE_READWRITE};
@@ -197,7 +273,7 @@ pub struct InjectResult {
     pub message: String,
 }
 
-/// 执行DLL注入
+/// 执行DLL注入（优化版：公共步骤只做一次）
 pub fn inject_dll(
     pid: u32,
     dll_path: &str,
@@ -210,28 +286,40 @@ pub fn inject_dll(
         return Err(InjectError::DllNotFound(dll_path.to_string()));
     }
 
-    match method {
+    // 公共步骤：架构检查 + OpenProcess + 写路径 + 获取LoadLibraryA
+    let ctx = prepare_inject_context(pid, dll_path)?;
+
+    // 各方法只负责最后的触发步骤
+    let result = match method {
         InjectionMethod::CreateRemoteThread => {
-            methods::create_remote_thread::inject(pid, dll_path)?;
+            methods::create_remote_thread::inject_with_context(&ctx)
         }
         InjectionMethod::NtCreateThreadEx => {
-            methods::nt_create_thread::inject(pid, dll_path)?;
+            methods::nt_create_thread::inject_with_context(&ctx)
         }
         InjectionMethod::QueueUserAPC => {
-            methods::queue_user_apc::inject(pid, dll_path)?;
+            methods::queue_user_apc::inject_with_context(pid, &ctx)
         }
         InjectionMethod::ManualMap => {
-            methods::manual_map::inject(pid, dll_path)?;
+            methods::manual_map::inject_with_context(&ctx)
         }
-    }
+    };
 
-    log::info!("DLL 注入成功: pid={}, path={}, method={}", pid, dll_path, method);
-    Ok(InjectResult {
-        success: true,
-        method: method.to_string(),
-        dll_path: dll_path.to_string(),
-        message: format!("DLL注入成功 [{}]", method),
-    })
+    // 清理：关闭进程句柄
+    unsafe { let _ = windows::Win32::Foundation::CloseHandle(ctx.process_handle); }
+
+    match result {
+        Ok(()) => {
+            log::info!("DLL 注入成功: pid={}, path={}, method={}", pid, dll_path, method);
+            Ok(InjectResult {
+                success: true,
+                method: method.to_string(),
+                dll_path: dll_path.to_string(),
+                message: format!("DLL注入成功 [{}]", method),
+            })
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// 尝试多种方式注入DLL（自动降级）
@@ -240,6 +328,15 @@ pub fn inject_dll_auto(
     dll_path: &str,
 ) -> Result<InjectResult, InjectError> {
     log::info!("开始自动降级注入: pid={}, path={}", pid, dll_path);
+
+    if !std::path::Path::new(dll_path).exists() {
+        log::error!("DLL 文件不存在: {}", dll_path);
+        return Err(InjectError::DllNotFound(dll_path.to_string()));
+    }
+
+    // 公共步骤只做一次
+    let ctx = prepare_inject_context(pid, dll_path)?;
+
     let methods = [
         InjectionMethod::CreateRemoteThread,
         InjectionMethod::NtCreateThreadEx,
@@ -250,10 +347,31 @@ pub fn inject_dll_auto(
     let mut last_err = InjectError::InjectionDenied;
     for method in &methods {
         log::info!("尝试注入方式: {}", method);
-        match inject_dll(pid, dll_path, *method) {
-            Ok(result) => {
+        let result = match method {
+            InjectionMethod::CreateRemoteThread => {
+                methods::create_remote_thread::inject_with_context(&ctx)
+            }
+            InjectionMethod::NtCreateThreadEx => {
+                methods::nt_create_thread::inject_with_context(&ctx)
+            }
+            InjectionMethod::QueueUserAPC => {
+                methods::queue_user_apc::inject_with_context(pid, &ctx)
+            }
+            InjectionMethod::ManualMap => {
+                methods::manual_map::inject_with_context(&ctx)
+            }
+        };
+
+        match result {
+            Ok(()) => {
                 log::info!("自动降级注入成功，使用方式: {}", method);
-                return Ok(result);
+                unsafe { let _ = windows::Win32::Foundation::CloseHandle(ctx.process_handle); }
+                return Ok(InjectResult {
+                    success: true,
+                    method: method.to_string(),
+                    dll_path: dll_path.to_string(),
+                    message: format!("DLL注入成功 [{}]", method),
+                });
             }
             Err(e) => {
                 log::warn!("注入方式 {} 失败: {}", method, e);
@@ -261,6 +379,59 @@ pub fn inject_dll_auto(
             }
         }
     }
+
+    unsafe { let _ = windows::Win32::Foundation::CloseHandle(ctx.process_handle); }
     log::error!("所有注入方式均失败: {}", last_err);
     Err(last_err)
+}
+
+/// 获取注入方式信息（前端展示用）
+pub fn get_methods_info() -> Vec<MethodInfo> {
+    vec![
+        MethodInfo {
+            name: "auto".to_string(),
+            label: "自动".to_string(),
+            description: "依次尝试所有注入方式，第一个成功的即采用。兼容性最好，推荐首选。".to_string(),
+            pros: "兼容性最好，自动选择最优方式".to_string(),
+            cons: "耗时稍长（依次尝试）".to_string(),
+        },
+        MethodInfo {
+            name: "remote_thread".to_string(),
+            label: "CreateRemoteThread".to_string(),
+            description: "经典注入方法：在目标进程中分配内存写入DLL路径，通过CreateRemoteThread创建远程线程调用LoadLibraryA。".to_string(),
+            pros: "兼容性最好，实现简单，几乎所有进程都支持".to_string(),
+            cons: "最容易被安全软件检测，反作弊系统重点监控".to_string(),
+        },
+        MethodInfo {
+            name: "nt_thread".to_string(),
+            label: "NtCreateThreadEx".to_string(),
+            description: "通过ntdll.dll的NtCreateThreadEx系统调用创建远程线程，比CreateRemoteThread更底层。".to_string(),
+            pros: "内核级调用，可绕过部分基于CreateRemoteThread的安全检测".to_string(),
+            cons: "部分安全软件也会监控NtCreateThreadEx".to_string(),
+        },
+        MethodInfo {
+            name: "apc".to_string(),
+            label: "QueueUserAPC".to_string(),
+            description: "向目标进程的所有线程排队APC（异步过程调用）回调，当线程进入alertable状态时自动执行LoadLibraryA。".to_string(),
+            pros: "不创建新线程，隐蔽性较好，不易被线程监控发现".to_string(),
+            cons: "依赖线程进入alertable状态，对Java进程可能不稳定".to_string(),
+        },
+        MethodInfo {
+            name: "manual".to_string(),
+            label: "ManualMap".to_string(),
+            description: "将DLL的PE映像手动写入目标进程内存，解析PE头、映射各个节、处理重定位。不通过LoadLibrary加载。".to_string(),
+            pros: "隐蔽性最强，绕过模块枚举检测，不会出现在进程模块列表中".to_string(),
+            cons: "实现复杂，部分DLL可能因缺少加载器初始化而崩溃".to_string(),
+        },
+    ]
+}
+
+/// 注入方式信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MethodInfo {
+    pub name: String,
+    pub label: String,
+    pub description: String,
+    pub pros: String,
+    pub cons: String,
 }

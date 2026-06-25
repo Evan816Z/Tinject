@@ -373,6 +373,14 @@ fn main() {
                                 "statuses": statuses
                             })).unwrap_or_default()
                         }
+                        "get_methods_info" => {
+                            log::debug!("获取注入方式信息");
+                            let methods = injector::get_methods_info();
+                            serde_json::to_string(&serde_json::json!({
+                                "success": true,
+                                "methods": methods
+                            })).unwrap_or_default()
+                        }
                         "read_image_base64" => {
                             if let Some(path) = msg.get("path").and_then(|p| p.as_str()) {
                                 log::debug!("读取图片并编码为 base64: {}", path);

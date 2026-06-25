@@ -1,31 +1,18 @@
-use super::super::InjectError;
-use std::path::Path;
-use windows::core::PCSTR;
+use super::super::{InjectContext, InjectError};
 use windows::Win32::Foundation::CloseHandle;
 use windows::Win32::System::Memory::{
     VirtualAllocEx, VirtualProtectEx, MEM_COMMIT, MEM_RESERVE,
     PAGE_EXECUTE_READ, PAGE_READWRITE,
 };
-use windows::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
 use windows::Win32::System::Threading::{
-    CreateRemoteThread, OpenProcess, WaitForSingleObject,
-    INFINITE, PROCESS_CREATE_THREAD, PROCESS_QUERY_INFORMATION,
-    PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE,
+    CreateRemoteThread, WaitForSingleObject, INFINITE,
 };
 
 /// ManualMap 注入
 /// 手动将DLL的PE映像写入目标进程内存，不调用LoadLibraryA加载
 /// 绕过模块枚举检测，隐蔽性最强；当前实现为简化版，PE映射后仍以LoadLibraryA作为fallback
-pub fn inject(pid: u32, dll_path: &str) -> Result<(), InjectError> {
-    let dll_path = Path::new(dll_path)
-        .canonicalize()
-        .map_err(|_| InjectError::DllNotFound(dll_path.to_string()))?;
-
-    crate::injector::validate_architecture(pid, &dll_path)?;
-
-    // 读取DLL文件内容
-    let dll_data = std::fs::read(&dll_path)
-        .map_err(|e| InjectError::ManualMapFailed(format!("读取DLL失败: {}", e)))?;
+pub fn inject_with_context(ctx: &InjectContext) -> Result<(), InjectError> {
+    let dll_data = &ctx.dll_data;
 
     // 验证PE头
     if dll_data.len() < 2 || &dll_data[0..2] != b"MZ" {
@@ -33,19 +20,6 @@ pub fn inject(pid: u32, dll_path: &str) -> Result<(), InjectError> {
     }
 
     unsafe {
-        let access = PROCESS_CREATE_THREAD
-            | PROCESS_QUERY_INFORMATION
-            | PROCESS_VM_OPERATION
-            | PROCESS_VM_READ
-            | PROCESS_VM_WRITE;
-        log::debug!("ManualMap OpenProcess access=0x{:x}", access.0);
-        let process = OpenProcess(access, false, pid)
-            .map_err(|e| {
-                log::error!("OpenProcess 失败: {}", e);
-                InjectError::OpenProcessFailed(pid)
-            })?;
-        log::debug!("OpenProcess 成功: handle={:?}", process);
-
         // 解析PE头获取映像大小
         let dos_header = dll_data.as_ptr() as *const IMAGE_DOS_HEADER;
         let nt_headers_offset = (*dos_header).e_lfanew as usize;
@@ -56,7 +30,7 @@ pub fn inject(pid: u32, dll_path: &str) -> Result<(), InjectError> {
         // 在目标进程中分配内存
         log::debug!("在目标进程分配 PE 映像内存");
         let remote_base = VirtualAllocEx(
-            process,
+            ctx.process_handle,
             None,
             image_size,
             MEM_COMMIT | MEM_RESERVE,
@@ -65,8 +39,7 @@ pub fn inject(pid: u32, dll_path: &str) -> Result<(), InjectError> {
 
         if remote_base.is_null() {
             log::error!("VirtualAllocEx 分配 PE 映像内存失败");
-            let _ = CloseHandle(process);
-            return Err(InjectError::VirtualAllocFailed(pid));
+            return Err(InjectError::VirtualAllocFailed(0));
         }
         log::debug!("PE 映像内存分配成功: remote_base={:?}", remote_base);
 
@@ -75,7 +48,7 @@ pub fn inject(pid: u32, dll_path: &str) -> Result<(), InjectError> {
         let mut written = 0usize;
         log::debug!("写入 PE 头: {} bytes", header_size);
         let _ = windows::Win32::System::Diagnostics::Debug::WriteProcessMemory(
-            process,
+            ctx.process_handle,
             remote_base,
             dll_data.as_ptr() as *const _,
             header_size,
@@ -98,7 +71,7 @@ pub fn inject(pid: u32, dll_path: &str) -> Result<(), InjectError> {
             if section_size > 0 && section_ptr > 0 && section_ptr + section_size <= dll_data.len() {
                 log::debug!("写入节 #{}: va=0x{:x}, size={}", i, section_va, section_size);
                 let _ = windows::Win32::System::Diagnostics::Debug::WriteProcessMemory(
-                    process,
+                    ctx.process_handle,
                     section_va as *mut _,
                     dll_data.as_ptr().add(section_ptr) as *const _,
                     section_size,
@@ -109,59 +82,36 @@ pub fn inject(pid: u32, dll_path: &str) -> Result<(), InjectError> {
             }
         }
 
-        // 写入Loader Shellcode
+        // 设置内存页保护属性
+        log::debug!("修改 PE 映像内存保护为 EXECUTE_READ");
+        let _ = VirtualProtectEx(
+            ctx.process_handle,
+            remote_base,
+            image_size,
+            PAGE_EXECUTE_READ,
+            std::ptr::null_mut(),
+        );
+
         // 简化版：使用CreateRemoteThread + LoadLibraryA作为fallback
-        let dll_str = dll_path.to_str().unwrap_or("");
+        log::info!("ManualMap fallback: 创建远程线程调用 LoadLibraryA");
+        let thread = CreateRemoteThread(
+            ctx.process_handle,
+            None,
+            0,
+            Some(std::mem::transmute(ctx.load_library_addr)),
+            Some(ctx.remote_dll_path),
+            0,
+            None,
+        )
+        .map_err(|e| {
+            log::error!("CreateRemoteThread 失败: {}", e);
+            InjectError::ManualMapFailed("创建远程线程失败".to_string())
+        })?;
 
-        if !dll_str.is_empty() {
-            // 写入带空终止符的 DLL 路径
-            log::debug!("ManualMap fallback: 写入 DLL 路径");
-            let path_mem = crate::injector::write_remote_dll_path(process, dll_str)?;
-
-            let kernel32 = GetModuleHandleA(PCSTR(b"kernel32.dll\0".as_ptr()))
-                .map_err(|e| {
-                    log::error!("GetModuleHandleA(kernel32) 失败: {}", e);
-                    InjectError::ManualMapFailed("获取kernel32失败".to_string())
-                })?;
-            let load_library = GetProcAddress(kernel32, PCSTR(b"LoadLibraryA\0".as_ptr()))
-                .ok_or_else(|| {
-                    log::error!("GetProcAddress(LoadLibraryA) 失败");
-                    InjectError::ManualMapFailed("获取LoadLibrary失败".to_string())
-                })?;
-            log::debug!("LoadLibraryA 地址: {:?}", load_library);
-
-            // 设置内存页保护属性
-            log::debug!("修改 PE 映像内存保护为 EXECUTE_READ");
-            let _ = VirtualProtectEx(
-                process,
-                remote_base,
-                image_size,
-                PAGE_EXECUTE_READ,
-                std::ptr::null_mut(),
-            );
-
-            log::info!("ManualMap fallback: 创建远程线程调用 LoadLibraryA");
-            let thread = CreateRemoteThread(
-                process,
-                None,
-                0,
-                Some(std::mem::transmute(load_library)),
-                Some(path_mem),
-                0,
-                None,
-            )
-            .map_err(|e| {
-                log::error!("CreateRemoteThread 失败: {}", e);
-                InjectError::ManualMapFailed("创建远程线程失败".to_string())
-            })?;
-
-            log::debug!("等待远程线程完成...");
-            let _ = WaitForSingleObject(thread, INFINITE);
-            log::info!("远程线程执行完成");
-            let _ = CloseHandle(thread);
-        }
-
-        let _ = CloseHandle(process);
+        log::debug!("等待远程线程完成...");
+        let _ = WaitForSingleObject(thread, INFINITE);
+        log::info!("远程线程执行完成");
+        let _ = CloseHandle(thread);
     }
 
     Ok(())
