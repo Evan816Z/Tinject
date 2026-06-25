@@ -267,7 +267,7 @@ function confirmProcessSelection() {
     let added = 0;
     selectedPickerProcesses.forEach(name => {
         if (!processList.find(p => p.name === name)) {
-            processList.push({ name, selected: true, running: true });
+            processList.push({ name, selected: true, running: false });
             added++;
         }
     });
@@ -652,7 +652,12 @@ function loadSettings() {
             setBgImage(settings.bgImage);
         }
         if (settings.processes && Array.isArray(settings.processes)) {
-            processList = settings.processes;
+            // 加载时重置运行状态，由实时刷新机制检测真实状态
+            processList = settings.processes.map(p => ({
+                name: p.name,
+                selected: p.selected,
+                running: false
+            }));
         }
     }
 
